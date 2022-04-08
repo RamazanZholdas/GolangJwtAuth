@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/RamazanZholdas/MyGoPlayground/jwtGinGolangTest/controllers"
 	"github.com/RamazanZholdas/MyGoPlayground/jwtGinGolangTest/database"
@@ -17,7 +18,7 @@ var (
 	mongoUri       string
 	dbName         string
 	collectionName string
-	envData        map[string]string
+	bcryptCost     int
 )
 
 func init() {
@@ -31,7 +32,7 @@ func init() {
 		log.Fatal("BCRYPT_COST not found, using minimum cost: 4")
 		bcryptCostStr = "4"
 	}
-	envData["BCRYPT_COST"] = bcryptCostStr
+	bcryptCost, _ = strconv.Atoi(bcryptCostStr)
 
 	port, ok = os.LookupEnv("PORT")
 	if !ok {
@@ -50,14 +51,12 @@ func init() {
 		fmt.Println("DB_NAME not found, using default: test")
 		dbName = "test"
 	}
-	envData["DB_NAME"] = dbName
 
 	collectionName, ok = os.LookupEnv("COLLECTION_NAME")
 	if !ok {
 		fmt.Println("COLLECTION_NAME not found, using default: users")
 		collectionName = "users"
 	}
-	envData["COLLECTION_NAME"] = collectionName
 }
 
 func main() {
@@ -75,8 +74,8 @@ func main() {
 
 	c := gin.Default()
 	// http://localhost:8080/{paste guid here}
-	c.GET("/:guid", controllers.GetTokens(c, envData, client, ctx))
-	c.POST("/refresh", controllers.Refresh(c, envData, client, ctx))
+	c.GET("/:guid", controllers.GetTokens(c, bcryptCost, dbName, collectionName, client, ctx))
+	c.POST("/refresh", controllers.Refresh(c, bcryptCost, dbName, collectionName, client, ctx))
 
 	c.Run(":" + port)
 }

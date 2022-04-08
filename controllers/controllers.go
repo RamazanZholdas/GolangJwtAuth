@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 
 	"github.com/RamazanZholdas/MyGoPlayground/jwtGinGolangTest/database"
 	"github.com/RamazanZholdas/MyGoPlayground/jwtGinGolangTest/structs"
@@ -17,7 +16,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func GetTokens(g *gin.Engine, envData map[string]string, client *mongo.Client, ctx context.Context) gin.HandlerFunc {
+func GetTokens(g *gin.Engine, bcryptCost int, dbName string, collectionName string, client *mongo.Client, ctx context.Context) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Add("Content-Type", "application/json")
 		var user structs.User
@@ -28,8 +27,6 @@ func GetTokens(g *gin.Engine, envData map[string]string, client *mongo.Client, c
 			return
 		}
 
-		bcryptCost, _ := strconv.Atoi(envData["BCRYPT_COST"])
-
 		hash, err := bcrypt.GenerateFromPassword([]byte(refreshToken), bcryptCost)
 		if err != nil {
 			log.Fatal(err)
@@ -38,7 +35,7 @@ func GetTokens(g *gin.Engine, envData map[string]string, client *mongo.Client, c
 		user.RefreshToken = string(hash)
 		user.Jti = jti
 
-		insertOneResult, err := database.InsertOne(client, ctx, envData["DB_NAME"], envData["COLLECTION_NAME"], user)
+		insertOneResult, err := database.InsertOne(client, ctx, dbName, collectionName, user)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			fmt.Println("4", err)
@@ -54,7 +51,7 @@ func GetTokens(g *gin.Engine, envData map[string]string, client *mongo.Client, c
 	}
 }
 
-func Refresh(g *gin.Engine, envData map[string]string, client *mongo.Client, ctx context.Context) gin.HandlerFunc {
+func Refresh(g *gin.Engine, bcryptCost int, dbName string, collectionName string, client *mongo.Client, ctx context.Context) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Add("Content-Type", "application/json")
 		refreshToken := c.Request.Header.Get("RefreshToken")
@@ -69,7 +66,7 @@ func Refresh(g *gin.Engine, envData map[string]string, client *mongo.Client, ctx
 		}
 		fmt.Println("userJti:", userJti)
 		var user structs.User
-		user, err = database.FindOne(client, ctx, envData["DB_NAME"], envData["COLLECTION_NAME"], bson.M{"jti": userJti})
+		user, err = database.FindOne(client, ctx, dbName, collectionName, bson.M{"jti": userJti})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -90,14 +87,14 @@ func Refresh(g *gin.Engine, envData map[string]string, client *mongo.Client, ctx
 			return
 		}
 
-		hash, err := bcrypt.GenerateFromPassword([]byte(refreshToken), bcrypt.MinCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(refreshToken), bcryptCost)
 		if err != nil {
 			log.Fatal(err)
 		}
 		user.RefreshToken = string(hash)
 		user.Jti = jti
 		update := bson.M{"$set": bson.M{"refreshToken": user.RefreshToken, "jti": user.Jti}}
-		updateResult, err := database.UpdateOne(client, ctx, envData["DB_NAME"], envData["COLLECTION_NAME"], bson.M{"guid": user.GUID}, update)
+		updateResult, err := database.UpdateOne(client, ctx, dbName, collectionName, bson.M{"guid": user.GUID}, update)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
