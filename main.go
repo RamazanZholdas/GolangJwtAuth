@@ -128,7 +128,6 @@ func main() {
 		var user structs.User
 		user, err = database.FindOne(client, ctx, dbName, collectionName, bson.M{"jti": userJti})
 		if err != nil {
-			fmt.Println("user not found")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
