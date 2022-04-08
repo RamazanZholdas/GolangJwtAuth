@@ -11,7 +11,7 @@ import (
 )
 
 func Connect(uri string) (*mongo.Client, context.Context, context.CancelFunc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
 	return client, ctx, cancel, err

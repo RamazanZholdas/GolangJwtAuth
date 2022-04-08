@@ -93,7 +93,7 @@ func Refresh(g *gin.Engine, bcryptCost int, dbName string, collectionName string
 		}
 		user.RefreshToken = string(hash)
 		user.Jti = jti
-		update := bson.M{"$set": bson.M{"refreshToken": user.RefreshToken, "jti": user.Jti}}
+		update := bson.M{"$set": bson.M{"refreshtoken": user.RefreshToken, "jti": user.Jti}}
 		updateResult, err := database.UpdateOne(client, ctx, dbName, collectionName, bson.M{"guid": user.GUID}, update)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
