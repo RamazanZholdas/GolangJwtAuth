@@ -55,7 +55,6 @@ func DropDatabase(client *mongo.Client, ctx context.Context, dbName string) erro
 	return nil
 }
 
-//find one document assign it to user struct and return it
 func FindOne(client *mongo.Client, ctx context.Context, dataBase, col string, filter interface{}) (user structs.User, err error) {
 	collection := client.Database(dataBase).Collection(col)
 	err = collection.FindOne(ctx, filter).Decode(&user)
