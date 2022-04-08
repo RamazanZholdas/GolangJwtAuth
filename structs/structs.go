@@ -1,11 +1,17 @@
 package structs
 
+import (
+	"github.com/dgrijalva/jwt-go"
+)
+
 type Token struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token"`
+	GUID string
+	Jti  string
+	jwt.StandardClaims
 }
 
 type User struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
+	GUID         string `json:"guid"`
+	Jti          string `json:"jti"`
+	RefreshToken string `json:"refreshToken"`
 }

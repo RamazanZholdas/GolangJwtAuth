@@ -1,28 +1,29 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
-	"time"
+	"strconv"
 
 	"github.com/RamazanZholdas/MyGoPlayground/jwtGinGolangTest/database"
 	"github.com/RamazanZholdas/MyGoPlayground/jwtGinGolangTest/structs"
+	"github.com/RamazanZholdas/MyGoPlayground/jwtGinGolangTest/tokens"
+	"go.mongodb.org/mongo-driver/bson"
 
 	"github.com/gin-gonic/gin"
-	"github.com/go-playground/validator/v10"
 	"github.com/joho/godotenv"
-	"github.com/kataras/jwt"
-	"go.mongodb.org/mongo-driver/bson"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
-	secret         string
 	port           string
 	mongoUri       string
 	dbName         string
 	collectionName string
+	bcryptCost     int
 )
 
 func init() {
@@ -31,11 +32,12 @@ func init() {
 		log.Fatal(err)
 	}
 
-	secret, ok = os.LookupEnv("SECRET")
+	bcryptCostStr, ok := os.LookupEnv("BCRYPT_COST")
 	if !ok {
-		fmt.Println("SECRET not found, using default: secret")
-		secret = "secret"
+		log.Fatal("BCRYPT_COST not found, using minimum cost: 4")
+		bcryptCostStr = "4"
 	}
+	bcryptCost, _ = strconv.Atoi(bcryptCostStr)
 
 	port, ok = os.LookupEnv("PORT")
 	if !ok {
@@ -76,49 +78,27 @@ func main() {
 	defer database.DropDatabase(client, ctx, dbName)
 	defer database.DropCollection(client, ctx, dbName, collectionName)
 
-	c := gin.New()
-	c.Use(gin.Logger())
-
-	c.POST("/", func(c *gin.Context) {
+	c := gin.Default()
+	// http://localhost:8080/{paste guid here}
+	c.GET("/:guid", func(c *gin.Context) {
 		c.Writer.Header().Add("Content-Type", "application/json")
 		var user structs.User
-		validate := validator.New()
 
-		if err := c.BindJSON(&user); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			fmt.Println("1", err)
-			return
-		}
-
-		valErr := validate.Struct(user)
-		if valErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": valErr.Error()})
-			fmt.Println("valErr", valErr)
-			return
-		}
-
-		exist, err := database.CheckIfExist(client, ctx, dbName, collectionName, "email", user.Email)
+		token, refreshToken, jti, err := tokens.GenerateTokens(c.Param("guid"))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			fmt.Println("check if exist", err)
-			return
-		}
-		if exist {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "User with this email already exists"})
-			fmt.Println("user exist", err)
 			return
 		}
 
-		fmt.Println(user)
-
-		document, err := bson.Marshal(user)
+		hash, err := bcrypt.GenerateFromPassword([]byte(refreshToken), bcryptCost)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			fmt.Println("3", err)
-			return
+			log.Fatal(err)
 		}
+		user.GUID = c.Param("guid")
+		user.RefreshToken = string(hash)
+		user.Jti = jti
 
-		insertOneResult, err := database.InsertOne(client, ctx, dbName, collectionName, document)
+		insertOneResult, err := database.InsertOne(client, ctx, dbName, collectionName, user)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			fmt.Println("4", err)
@@ -127,60 +107,65 @@ func main() {
 		fmt.Println("Result of InsertOne:")
 		fmt.Println(insertOneResult.InsertedID)
 
-		token, err := jwt.Sign(jwt.HS512, secret, user, jwt.MaxAge(15*time.Minute))
-		if err != nil {
-			panic(err)
-		}
-
-		refreshToken, err := jwt.Sign(jwt.HS512, secret, user, jwt.MaxAge(time.Hour*24*30))
-		if err != nil {
-			panic(err)
-		}
-
-		c.JSON(http.StatusOK, structs.Token{
-			AccessToken:  string(token),
-			RefreshToken: string(refreshToken),
+		c.JSON(http.StatusOK, gin.H{
+			"AccessToken":  token,
+			"RefreshToken": base64.RawURLEncoding.EncodeToString([]byte(refreshToken)),
 		})
 	})
 
 	c.POST("/refresh", func(c *gin.Context) {
-		c.Writer.Header().Add("Content-Type", "application/json")
-		/*refreshToken := c.Request.Header.Get("RefreshToken")
+		refreshToken := c.Request.Header.Get("RefreshToken")
 		if refreshToken == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "refresh token is empty"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "RefreshToken is empty"})
 			return
-		}*/
-		accessToken := c.Request.Header.Get("AccessToken")
-		if accessToken == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "access token is empty"})
+		}
+		userJti, err := tokens.ParseRefreshToken(refreshToken)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		fmt.Println("userJti:", userJti)
+		var user structs.User
+		user, err = database.FindOne(client, ctx, dbName, collectionName, bson.M{"jti": userJti})
+		if err != nil {
+			fmt.Println("user not found")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if user.GUID == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
 			return
 		}
 
-		_, err := jwt.Verify(jwt.HS256, secret, []byte(accessToken))
-		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		if err := bcrypt.CompareHashAndPassword([]byte(user.RefreshToken), []byte(refreshToken)); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid refresh token"})
 			return
 		}
 
-		/*_, err = jwt.Verify(jwt.HS256, secret, []byte(refreshToken))
+		token, refreshToken, jti, err := tokens.GenerateTokens(user.GUID)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
-		}*/
-
-		Atoken, err := jwt.Sign(jwt.HS512, secret, jwt.Claims{}, jwt.MaxAge(15*time.Minute))
-		if err != nil {
-			panic(err)
 		}
 
-		Rtoken, err := jwt.Sign(jwt.HS512, secret, jwt.Claims{}, jwt.MaxAge(time.Hour*24*30))
+		hash, err := bcrypt.GenerateFromPassword([]byte(refreshToken), bcrypt.MinCost)
 		if err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
+		user.RefreshToken = string(hash)
+		user.Jti = jti
+		update := bson.M{"$set": bson.M{"refreshToken": user.RefreshToken, "jti": user.Jti}}
+		updateResult, err := database.UpdateOne(client, ctx, dbName, collectionName, bson.M{"guid": user.GUID}, update)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		fmt.Println("Result of UpdateOne:")
+		fmt.Println(updateResult.UpsertedID)
 
-		c.JSON(http.StatusOK, structs.Token{
-			AccessToken:  string(Atoken),
-			RefreshToken: string(Rtoken),
+		c.JSON(http.StatusOK, gin.H{
+			"AccessToken":  token,
+			"RefreshToken": base64.RawURLEncoding.EncodeToString([]byte(refreshToken)),
 		})
 	})
 

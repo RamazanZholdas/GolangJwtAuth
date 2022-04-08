@@ -4,13 +4,14 @@ import (
 	"context"
 	"time"
 
-	"go.mongodb.org/mongo-driver/bson"
+	"github.com/RamazanZholdas/MyGoPlayground/jwtGinGolangTest/structs"
+
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func Connect(uri string) (*mongo.Client, context.Context, context.CancelFunc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
 	return client, ctx, cancel, err
@@ -54,18 +55,16 @@ func DropDatabase(client *mongo.Client, ctx context.Context, dbName string) erro
 	return nil
 }
 
-//check if the value in collection exist
-func CheckIfExist(client *mongo.Client, ctx context.Context, dbName, collectionName, field, value string) (bool, error) {
-	collection := client.Database(dbName).Collection(collectionName)
-	filter := bson.M{
-		field: value,
-	}
-	count, err := collection.CountDocuments(ctx, filter)
-	if err != nil {
-		return false, err
-	}
-	if count > 0 {
-		return true, nil
-	}
-	return false, nil
+//find one document assign it to user struct and return it
+func FindOne(client *mongo.Client, ctx context.Context, dataBase, col string, filter interface{}) (user structs.User, err error) {
+	collection := client.Database(dataBase).Collection(col)
+	err = collection.FindOne(ctx, filter).Decode(&user)
+	return user, err
+}
+
+func UpdateOne(client *mongo.Client, ctx context.Context, dataBase,
+	col string, filter, update interface{}) (result *mongo.UpdateResult, err error) {
+	collection := client.Database(dataBase).Collection(col)
+	result, err = collection.UpdateOne(ctx, filter, update)
+	return
 }
